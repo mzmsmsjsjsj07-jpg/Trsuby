@@ -16,12 +16,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install unzip
+      - name: Install tools
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip
 
-      - name: Extract Android project
+      - name: Extract project
         shell: bash
         run: |
           set -e
@@ -32,20 +32,19 @@ jobs:
             mkdir -p extracted_project
             unzip -oq "$ZIP_FILE" -d extracted_project
 
-            SETTINGS_FILE="$(find extracted_project -type f \( -name settings.gradle -o -name settings.gradle.kts \) | head -n 1)"
+            SETTINGS="$(find extracted_project -type f \( -name settings.gradle -o -name settings.gradle.kts \) | head -n 1)"
 
-            if [ -z "$SETTINGS_FILE" ]; then
-              echo "ERROR: settings.gradle not found in ZIP"
-              find extracted_project -maxdepth 4 -type f | head -n 100
+            if [ -z "$SETTINGS" ]; then
+              echo "ERROR: Gradle settings file not found in ZIP"
               exit 1
             fi
 
-            PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+            PROJECT_DIR="$(dirname "$SETTINGS")"
             cp -a "$PROJECT_DIR"/. .
           fi
 
           if [ ! -f settings.gradle ] && [ ! -f settings.gradle.kts ]; then
-            echo "ERROR: Android project not found in repository root"
+            echo "ERROR: Android project not found"
             exit 1
           fi
 
@@ -58,25 +57,42 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK
-        shell: bash
+      - name: Install Android packages
         run: |
-          set -e
-          yes | sdkmanager --licenses
-          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          fi
+
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager executable not found"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
 
       - name: Build APK
         shell: bash
         run: |
           set -e
 
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew --no-daemon assembleDebug --stacktrace
-          else
-            echo "ERROR: Gradle wrapper is missing"
+          if [ ! -f gradlew ]; then
+            echo "ERROR: gradlew not found"
             exit 1
           fi
+
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
